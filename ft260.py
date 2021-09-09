@@ -1,4 +1,5 @@
 from enum import Enum
+from ctypes import wintypes
 import ctypes
 import os
 
@@ -37,7 +38,10 @@ class FT260:
 
     def open(self, vid=DEFAULT_FTDI_VID, pid=DEFAULT_FTDI_PID, device_number=0):
         status = self._lib.FT260_OpenByVidPid(
-            vid, pid, device_number, ctypes.byref(self.device)
+            wintypes.WORD(vid),
+            wintypes.WORD(pid),
+            wintypes.DWORD(device_number),
+            ctypes.byref(self.device),
         )
         CHECK_STATUS(status, info="open device")
         self.i2c = self.I2C(self)
@@ -49,7 +53,7 @@ class FT260:
 
         def activate(self, clock_speed=DEFAULT_I2C_CLOCK_SPEED):
             status = self.parent._lib.FT260_I2CMaster_Init(
-                self.parent.device, clock_speed
+                self.parent.device, ctypes.c_uint32(clock_speed)
             )
             CHECK_STATUS(status, info="initialize I2C")
             self.active = True
@@ -62,7 +66,7 @@ class FT260:
             )
             if status == STATUS.OK.value:
                 return
-            if status & 1 << 0:
+            if status & (1 << 0):
                 errors.append("Controller Busy")
             if status & (1 << 1):
                 errors.append("Error Condition")
@@ -79,7 +83,6 @@ class FT260:
             raise FT260Exception("I2C STATUS Error: {}".format(", ".join(errors)))
 
         def write(self, slave_address, data, flag=I2C_FLAG.START_AND_STOP):
-            self._check_status()
             if not self.active:
                 self.activate()
             bytes_written = ctypes.c_ulong(0)
@@ -87,15 +90,35 @@ class FT260:
             CHECK_STATUS(
                 self.parent._lib.FT260_I2CMaster_Write(
                     self.parent.device,
-                    slave_address,
+                    ctypes.c_uint8(slave_address),
                     flag,
                     ctypes.cast(data_to_be_written, ctypes.c_void_p),
-                    len(data),
+                    wintypes.DWORD(len(data)),
                     ctypes.byref(bytes_written),
                 )
             )
-            assert len(data) == bytes_written, "I2C Writing timeed out!"
+            assert len(data) == bytes_written.value, "I2C writing timed out!"
             self._check_status()
+
+        def read(self, slave_address, length, flag=I2C_FLAG.START_AND_STOP):
+            if not self.active:
+                self.activate()
+            bytes_actually_read = ctypes.c_ulong(0)
+            status = ctypes.c_uint8(0)
+            buffer = ctypes.create_string_buffer(length + 1)
+            CHECK_STATUS(
+                self._lib.FT260_I2CMaster_Read(
+                    self.parent.device,
+                    ctypes.c_uint8(slave_address),
+                    flag,
+                    ctypes.cast(buffer, ctypes.c_void_p),
+                    wintypes.DWORD(length),
+                    ctypes.byref(bytes_actually_read),
+                )
+            )
+            assert length == bytes_actually_read.value, "I2C reading timed out!"
+            self._check_status()
+            return buffer.raw
 
 
 class STATUS(Enum):  # CtypesEnum):
