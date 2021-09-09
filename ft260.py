@@ -30,9 +30,9 @@ class I2C_FLAG(Enum):
     START_AND_STOP = 0x06
 
 
-def CHECK_STATUS(status, info=None):
+def CHECK_STATUS(status):
     if status != STATUS.OK.value:
-        raise FT260Exception("Failed to {}: {}".format(info, STATUS(status)))
+        raise FT260Exception(STATUS(status))
 
 
 class FT260Exception(Exception):
@@ -57,8 +57,9 @@ class FT260:
             wintypes.DWORD(device_number),
             ctypes.byref(self.device),
         )
-        CHECK_STATUS(status, info="open device")
+        CHECK_STATUS(status)
         self.i2c = self.I2C(self)
+        self.gpio = self.GPIO(self)
 
     class I2C:
         def __init__(self, parent):
@@ -69,10 +70,10 @@ class FT260:
             status = self.parent._lib.FT260_I2CMaster_Init(
                 self.parent.device, ctypes.c_uint32(clock_speed)
             )
-            CHECK_STATUS(status, info="initialize I2C")
+            CHECK_STATUS(status)
             self.active = True
 
-        def _check_status(self):
+        def _check_i2c_status(self):
             errors = []
             status = ctypes.c_uint8(0)
             self.parent._lib.FT260_I2CMaster_GetStatus(
@@ -101,7 +102,7 @@ class FT260:
                 )
             )
             assert len(data) == bytes_written.value, "I2C writing timed out!"
-            self._check_status()
+            self._check_i2c_status()
 
         def read(self, slave_address, length, flag=I2C_FLAG.START_AND_STOP):
             if not self.active:
@@ -119,7 +120,7 @@ class FT260:
                 )
             )
             assert length == bytes_actually_read.value, "I2C reading timed out!"
-            self._check_status()
+            self._check_i2c_status()
             return buffer.raw
 
         def scan(self):
@@ -135,8 +136,26 @@ class FT260:
         def reset(self):
             CHECK_STATUS(self._lib.FT260_I2CMaster_Reset(self.parent.device))
 
+    class GPIO:
+        def __init__(self, parent):
+            self.parent = parent
 
-class STATUS(Enum):  # CtypesEnum):
+        def read(self, pin_number):
+            pin_value = ctypes.c_ubyte(0)
+            CHECK_STATUS(
+                self._lib.FT260_GPIO_Read(
+                    self.parent.device, pin_number, ctypes.byref(pin_value)
+                )
+            )
+            return pin_value.value
+
+        def set_pin_direction(self, pin, direction):
+            CHECK_STATUS(
+                self._lib.FT260_GPIO_SetDir(self.parent.device, pin, direction)
+            )
+
+
+class STATUS(Enum):
     OK = 0
     INVALID_HANDLE = 1
     DEVICE_NOT_FOUND = 2
