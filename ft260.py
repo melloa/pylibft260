@@ -12,6 +12,16 @@ I2C_START_ADDRESS = 0x08
 I2C_END_ADDRESS = 0x7C
 
 
+class I2C_STATUS(Enum):
+    CONTROLLER_BUSY = 0x01
+    ERROR_CONDITION = 0x02
+    SLAVE_ADDRESS_NACK = 0x04
+    DATA_NACK = 0x08
+    ARBITRATION_LOST = 0x10
+    CONTROLLER_IDLE = 0x20
+    BUS_BUSY = 0x40
+
+
 class I2C_FLAG(Enum):
     NONE = 0x00
     START = 0x02
@@ -26,6 +36,10 @@ def CHECK_STATUS(status, info=None):
 
 
 class FT260Exception(Exception):
+    pass
+
+
+class FT260_I2C_Error(FT260Exception):
     pass
 
 
@@ -66,21 +80,10 @@ class FT260:
             )
             if status == STATUS.OK.value:
                 return
-            if status & (1 << 0):
-                errors.append("Controller Busy")
-            if status & (1 << 1):
-                errors.append("Error Condition")
-            if status & (1 << 2):
-                errors.append("Target Address Not Acknowledged")
-            if status & (1 << 3):
-                errors.append("Data Not Acknowledged")
-            if status & (1 << 4):
-                errors.append("Arbitration Lost")
-            if status & (1 << 5):
-                errors.append("Controller Idle")
-            if status & (1 << 6):
-                errors.append("Bus Busy")
-            raise FT260Exception("I2C STATUS Error: {}".format(", ".join(errors)))
+            for condition in I2C_STATUS:
+                if status & condition.value != 0:
+                    errors.append(condition.name)
+            raise FT260_I2C_Error(*errors)
 
         def write(self, slave_address, data, flag=I2C_FLAG.START_AND_STOP):
             if not self.active:
@@ -119,13 +122,18 @@ class FT260:
             self._check_status()
             return buffer.raw
 
-        def reset(self):
-            CHECK_STATUS(
-                self._lib.FT260_I2CMaster_Reset(
-                    self.parent.device
-                )
-            )
+        def scan(self):
+            addresses_found = []
+            for address in range(I2C_START_ADDRESS, I2C_END_ADDRESS):
+                try:
+                    self.read(address, 1, I2C_FLAG.START_AND_STOP)
+                except FT260_I2C_Error as e:
+                    if e.args is tuple("SLAVE_ADDRESS_NACK"):
+                        addresses_found.append(hex(address))
+            return addresses_found
 
+        def reset(self):
+            CHECK_STATUS(self._lib.FT260_I2CMaster_Reset(self.parent.device))
 
 
 class STATUS(Enum):  # CtypesEnum):
