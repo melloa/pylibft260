@@ -104,7 +104,6 @@ class FT260:
             if not self.active:
                 self.activate()
             bytes_actually_read = ctypes.c_ulong(0)
-            status = ctypes.c_uint8(0)
             buffer = ctypes.create_string_buffer(length + 1)
             CHECK_STATUS(
                 self._lib.FT260_I2CMaster_Read(
@@ -119,6 +118,14 @@ class FT260:
             assert length == bytes_actually_read.value, "I2C reading timed out!"
             self._check_status()
             return buffer.raw
+
+        def reset(self):
+            CHECK_STATUS(
+                self._lib.FT260_I2CMaster_Reset(
+                    self.parent.device
+                )
+            )
+
 
 
 class STATUS(Enum):  # CtypesEnum):
